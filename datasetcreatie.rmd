@@ -1,0 +1,110 @@
+```{r inlezen van data koffie, message=F, warning=F}
+# inladen van ruwe files is in het volgende gedeelte te zien.
+# Ik heb hier gebruik gemaakt van Hadleys readr package(betere defaults)
+# Uiteindleijke maak ik een bestand dat alle metingen per datum heeft open dat met:
+library(readr)
+koffeeTotaal<- read_csv("koffieTotaal.csv")
+#rm(list = ls() ) 	#dit verwijdert alle bestanden uit de workspace.
+#set working directory (mocht je niet in het goede project zitten)
+setwd("~/dre-roel map/R/koffie")
+library(readr) #ik roep de libraries steeds aan het begin van elk codestukje op 
+#maar eenmaal aangeroepen zouden ze gewoon moeten werken.
+RoelsKoffie<-read_csv("koffie.txt", col_names = c("datum", "tijd"))
+SamenKoffie<-read_csv("koffie met dre.txt", col_names = c("datum", "tijd"))
+DreKoffie <-read_csv("coffee dre.txt", col_names = c("datum", "tijd"))
+#variabelen toevoegen
+RoelsKoffie$cat <-"roel alleen"  #categorische variabele
+SamenKoffie$cat <- "Samen"
+DreKoffie$cat <- "Dre alleen"#eindresultaat is nu drie dataframes met 3 naamloze kolommen.
+Coffee <-rbind(RoelsKoffie, SamenKoffie, DreKoffie)
+Coffee$counter<-1  #koffiecounter toevoegen
+Coffee$datum <- as.Date(Coffee$datum, "%m-%d-%Y") #verandert datum in date format.
+Coffee$datetime<- as.POSIXct(paste(Coffee$datum, Coffee$tijd, sep=" "), 
+                             format="%Y-%m-%d %H:%M")
+Coffee$dag<-as.character(weekdays(Coffee$datum)) #creeert variabele dag.
+Coffee$dag<- factor(Coffee$dag, levels = c("maandag","dinsdag","woensdag", "donderdag", "vrijdag", "zaterdag", "zondag"))
+Coffee$tijduren<-sapply(strsplit(Coffee$tijd,":"),
+                        function(x) {
+                          x <- as.numeric(x)
+                          x[1]+x[2]/60} ) #van https://stackoverflow.com/questions/5186972/how-to-convert-time-mmss-to-decimal-form-in-r
+Coffee$dagdeel[which(Coffee$tijduren <12)] <- "ochtend"  
+Coffee$dagdeel[which(Coffee$tijduren >= 12 & Coffee$tijduren <18)] <- "middag"  
+Coffee$dagdeel[which(Coffee$tijduren >=18)] <- "avond" 
+rm(RoelsKoffie, SamenKoffie, DreKoffie)
+#creatie van aparte sets voor als dat leuk is. Dis is niet perse nodig. je kunt ook selecteren uit de totaaldataset voordat je start.
+# library(dplyr)
+# Roel <- filter(Coffee, cat == "roel alleen")
+# Samen <- filter(Coffee, cat == "Samen")
+# Dre<- filter(Coffee, cat == "Dre alleen")
+#library(dplyr);library(ggplot2);
+#theme_set(theme_grey())
+#readr, dplyr, ggplot2, cowplot, lubridate, GGally
+```
+
+#combineren van datasets.
+De drie datasets hebben allemaal datum momenten en kunnen daarop ook gecombineerd worden (opnieuw, dit zie je niet in de pdf, maar wel in de rmd file). 
+
+```{r combineren van datasets}
+library(dplyr) #again, waarschijnlijk al geladen maar je weet maar nooit.
+koffieTotaal<- left_join(Coffee, KNMI, by = "datum")%>%  #left join want ik wil het matchen aan koffie en niet andersom
+  left_join(., beurs, by = c("datum" = "Date")) 
+#dus in plaats van een tussenbestand maken plak ik de handelingen aan elkaar vast 
+#met de pipe operator. De punt zegt: "het vorige". 
+#Dus: koffieTotaal is deze combinatie en dan (%>%) voeg dit er nog aan toe.
+#library(readr)
+#write_csv(koffieTotaal, "koffieTotaal.csv")  #schrijft file weg.
+dim(koffieTotaal) #622 observaties van 19 variabelen.
+write_csv(koffieTotaal, "koffieTotaal.csv")
+```
+
+#Weer en Beurs
+Dan laden we het weer in. Ik heb het weer per dag in Voorschoten tussen 2014-11-13 - 2015-6-5 opgevraagd en dan alleen temperatuur, zonne-uren, luchtdruk, neerslag en straling. (je ziet deze stap niet, maar staat wel in het rmarkdown bestand)
+
+```{r knmi laden}
+library(readr)
+library(dplyr)
+library(lubridate)
+KNMI<-read_csv("KNMI_20150605.txt",skip = 24, 
+               col_names = c("STN","YYYYMMDD",   "TG",   "TN",  "TNH",   "TX",  "TXH", "T10N",   
+                             "SQ",    "Q",   "DR",   "RH",   "PG",   "PX",  "PXH"), 
+               trim_ws = TRUE) #laden van dataset.
+KNMI<-KNMI %>%  #dit is een piping commando, niet noodzakelijk, maar maakt de stappen overzichtelijker. lees als "en dan"
+  mutate(datum = as.Date(fast_strptime(as.character(YYYYMMDD), "%Y%m%d")))%>%  #zet datum om in date formaat.
+  mutate(etmaalGemiddeldeTempGradenCelsius = TG/10 , zonneschijnUren = SQ/10, 
+         stralingJoulePerVierkanteCm = Q, EtmaalNeerslagMM = RH/10, gemLuchtdrukHectoPascal = PG/10)%>%  #namen en handige eenheden
+  select(datum, etmaalGemiddeldeTempGradenCelsius, zonneschijnUren, stralingJoulePerVierkanteCm,
+         EtmaalNeerslagMM,gemLuchtdrukHectoPascal ) #houd alleen de variablen over die ik wil. 
+#missings definieeren.
+KNMI$zonneschijnUren[KNMI$zonneschijnUren == -1] <- NA
+KNMI$EtmaalNeerslagMM[KNMI$EtmaalNeerslagMM == -1] <- NA
+```
+
+Dan de beurdata laden. Deze data komt van yahoo, want dat is de eerste die ik vond.
+Ik heb de dagdata van de AEX gedownload over dezelfde periode als het weer. 
+
+```{r aex data van de beurs}
+#beursdata maakt bestand koffieWeerBeurs
+library(readr)
+library(dplyr)
+beurs<- read_csv("YAHOO-INDEX_AEX.csv") #readr package herkent direct de datum als datum
+```
+
+
+
+```{r creatie van dag dataset}
+#creeert dataset koffie_dag waarin alle andreas regels worden verwijderd, gesorteerd wordt per datum, 
+# en dan opsomt koffieaantal per dag, en gemiddelde in andere waarden (die dan als het goed is identiek zijn (zelfde dag))
+koffie_dag<- koffeeTotaal %>%
+  filter( cat == "roel alleen" |cat == "Samen")%>%
+  group_by(datum)%>%
+  summarise(aantal = sum(counter, na.rm = T), 
+            temp = mean(etmaalGemiddeldeTempGradenCelsius),
+            zon = mean(zonneschijnUren),
+            straling = mean(stralingJoulePerVierkanteCm),
+            neerslag = mean(EtmaalNeerslagMM),
+            AEXopening = mean(Open, na.rm=T),
+            AEXsluiting = mean(Close, na.rm =T)
+            )
+library(readr)
+write_csv(koffie_dag, "koffie_dag.csv")
+```

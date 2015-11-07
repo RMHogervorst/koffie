@@ -1,0 +1,162 @@
+---
+title: "Koffie, of: hoe vinden we niet bestaande relaties"
+author: "Roel Hogervorst"
+date: "31 oktober 2015"
+output: pdf_document
+---
+```{r , echo=FALSE}
+library(knitr)
+opts_chunk$set(echo=FALSE, message = F, warning = F, fig.width = 6, fig.height = 4)
+```
+##Intro
+Op een mooie dag toen de wereld nog groen was hield Roel bij hoeveel koffie hij dronk.
+Ook Andreas hield koffie bij. We hielden zelfs bij hoeveel we samen dronken. 
+Ik laat in meerdere stappen zien hoe koffie, het weer en de beurs samenhangen. 
+Mijn data loopt van 2014-11-13 - 2015-6-5. In het ruwe rmarkdown bestand (rmd) zie je ook alle r code die gebruikt is om de grafieken te maken.
+
+Benodigdheden: R versie 3.2 of hoger. (Dit is gemaakt in R version 3.2.2 (2015-08-14) -- "Fire Safety" )
+Packages gebruikt: readr, dplyr, ggplot2, cowplot, lubridate, GGally
+
+#Koffie
+
+##Databewerking en methode
+
+De koffiedata was verzameld in losse .txt bestanden vanuit een log app die helaas 
+over is gegaan naar de 'darkside' en waar je nu voor moet betalen(een betere optie voor android is nu tap log).
+Er zijn een aantal manuele handelingen vooraf gegaan: ik heb de logbestanden 
+leeggehaald van andere log files en opgeslagen onder aparte namen want mijn logbestand bevatte ook de Samen data. De koffie samen en koffie Roel zijn nu een apart bestand geworden dat apart wordt ingeladen. 
+Voor de weer en knmi data heb ik gebruik gemaakt van knmi.nl en yahoo finance, waarbij ik heb geselecteerd tussen de twee uiterste data van de koffie (2014-11-13 - 2015-6-5). 
+
+Eerst bespreek ik het koffiegebruik dan het weer en vervolgens de beurs (AEX). 
+Hierna combineer ik de koffie, weer en beursdata. 
+
+##korte visualisatie van koffie data
+Dan visualiseren we de Coffee data in totaal.Ik gebruik ggplot en cowplot.  De visualisatie van alles is niet heel zinnig omdat Roel veel meer koffie drinkt dan Andreas en Roel veel meer heeft bijgehouden dan Andreas zoals te zien is in de tabel. 
+```{r tabel}
+library(readr)
+koffieTotaal<- read_csv("koffieTotaal.csv")
+table(koffieTotaal$cat,koffieTotaal$dagdeel)
+```
+Je ziet hieronder hoe de koffie percentueel is verdeeld over de dag en over de week. 
+
+```{r Visualisatie koffie per dag en dagdeel}
+library(ggplot2)
+library(scales)
+library(dplyr)
+
+# dit gedeelte maakt een samenvatting van de data per dagdeel
+koffie_percent_dagdeel <- koffieTotaal %>%    #dit (%>%) is een piping commando, niet noodzakelijk, maar maakt de stappen overzichtelijker. lees als "en dan"
+  group_by(cat, dagdeel) %>%  summarise(count = n()) %>%
+  mutate(percentage= count/sum(count))
+
+#dit gedeelte zegt welke data + welke grafiekvorm + aanpassing aan schaal + 3 onder elkaar.
+ggplot(data = koffie_percent_dagdeel , aes(x = dagdeel, y = percentage)) + geom_bar(stat = "identity")+ scale_y_continuous(labels=percent) + facet_wrap( ~ cat, ncol = 1) +xlab("") +ylab("")
+
+#idem als hierboven maar dan per dag
+koffie_percent_dag <- koffieTotaal %>%
+  group_by(cat, dag) %>%  summarise(count = n()) %>%
+  mutate(percentage= count/sum(count))
+
+#plot op zelfde manier als hierboven.
+ggplot(data = koffie_percent_dag , aes(x = dag, y = percentage)) + geom_bar(stat = "identity")+ scale_y_continuous(labels=percent) + facet_wrap( ~ cat, ncol = 1)  +xlab("") +ylab("")
+```
+
+Vervolgens zijn de koffiemomenten per persoon over de tijd per dag geplot met een lijn op 12 uur (ik heb ook nog wat veranderd aan de as titels en de naam vande legenda weggehaald)
+
+```{r plot van koffieconsumptie over het jaar}
+C<-qplot(datum, tijduren, data=koffieTotaal, color = cat)+ geom_hline(aes(yintercept= 12))
+C + xlab("") + ylab("Tijdstip op de dag") + ggtitle("Koffieconsumptie over het jaar") + theme(legend.title=element_blank())
+```
+
+Laten we dan kijken naar patronen in koffiegebruik.
+
+```{r}
+qplot(datum, tijduren, data = koffieTotaal, color = cat)+geom_smooth() + xlab("")+ ylab("Tijd")
+qplot(datum, tijduren, data = koffieTotaal, color = dag) +geom_smooth() + xlab("")+ ylab("Tijd")
+qplot(dag, tijduren, data = koffieTotaal) + geom_violin() + facet_wrap( ~ cat, ncol = 1) 
+```
+
+```{r}
+koffieTotaal %>%
+  filter(cat == "roel alleen") %>%   # ik selecteer hier alleen data van mij, zonder daar een apart file voor nodig te hebben.
+  qplot(datum, zonneschijnUren, data = . , color = dagdeel)
+
+```
+
+
+##overzicht van weer en beurs data.
+Eerst een overzicht van weer details over de gemeten periode en vervolgens een de opening en sluiting van de AEX.
+Helaas is de beurs gesloten op weekenden en dus mis ik daar een aantal waarden.
+
+```{r visualisatie weer en beurs}
+library(ggplot2)
+#weer
+#cowplot lijkt iets in ggplot2 te verwijderen. dus voeg volgende lijn toe:
+theme_set(theme_gray())
+
+D1 <-qplot(datum, etmaalGemiddeldeTempGradenCelsius, data= koffieTotaal)+geom_point(size =3)+geom_smooth()+ xlab("")  #de punten iets groter is fijner te zien.
+D2<- qplot(datum, stralingJoulePerVierkanteCm, data= koffieTotaal)+geom_point(size =3)+geom_smooth() + xlab("")   # de smoothing laat een trendlijn zien
+D3<- qplot(datum, EtmaalNeerslagMM, data= koffieTotaal)+geom_point(size =3)+geom_smooth()+ xlab("")  
+D4<-qplot(datum, zonneschijnUren, data= koffieTotaal)+geom_point(size =3)+geom_smooth()+ xlab("")  
+D5<-qplot(datum, gemLuchtdrukHectoPascal, data= koffieTotaal)+geom_point(size =3)+geom_smooth() + xlab("")  
+D1 + ylab("") + ggtitle("Gemiddelde temperatuur")
+D2 + ylab("") + ggtitle (expression(paste("Straling in joule per ", cm^"2")) )
+D3 + ylab("") + ggtitle("Gemiddelde neerslag in mm")
+D4 + ylab("") + ggtitle("Uren zonneschijn")
+D5 + ylab("") + ggtitle("Gemiddelde luchtdruk in hectopascal")
+#beurs
+library(cowplot)
+theme_set(theme_gray())
+E1<- qplot(datum, Open, data = koffieTotaal) + geom_smooth()+xlab("") #opening AEX
+E2<- qplot(datum, Close, data = koffieTotaal) + geom_smooth() +xlab("")#plot van closing AEX. 
+plot_grid(E1, E2, nrow = 2, hjust = T)
+```
+
+In de volgende visualisatie zie je de sluiting van de AEX en temperatuur. 
+Ze zijn niet echt gerelateerd.
+
+```{r simpele visualisaties}
+F1<- ggplot(data = koffieTotaal ,aes(datum, Close))+ geom_point() + xlab("")
+F2<- qplot(datum, etmaalGemiddeldeTempGradenCelsius  ,data = koffieTotaal) + xlab("") +ylab(" Temperatuur")
+plot_grid(F1, F2, align = "h", nrow = 2)
+```
+
+#Analysen
+
+##Correlaties tussen variabelen
+Laten we dan eens kijken naar relaties tussen variabelen. Dat kan met een correlatie per paar, 
+maar er is ook een coolere optie. In het volgende plot zie je alle relaties tussen verschillende variabelen. De kolommen en rijen zijn als volgt: dag (van de week), uren (tijdstip van koffie), dagdeel (ochtend middag, avond), temp (gemiddelde temperatuur op een dag), open (AEX van die dag opening). 
+
+```{r coolere optie, cache=TRUE, fig.height = 7, fig.width = 7}
+library(GGally)
+#LET OP DIT IS BEHOORLIJK COMPUTERINTENSIEF! en er komen warnings.
+G<-ggpairs(koffieTotaal, 
+        columns = c(6:9, 14:17),
+        upper = list(continuous = "density", combo = "facetdensity", size = 8),
+        lower = list(continuous = "points", combo = "dot"), axisLabels = "none",
+        columnLabels = c("dag","uren", "dagdeel","temp", "open", "hoog","laag","close"),
+        title = "koffiemomenten weer en beurs")
+suppressWarnings(print(G))  #Dit zorgt ervoor dat je geen warnings ziet.
+```
+
+Sommige verbanden zijn niet zo heel gek: de verdeling van uren over middag, avond, ochtend is logisch. De beurskoersen hebben geen informatie in de weekenden (dan is de beurs dicht).
+Denk eraan dat de informatie is gekoppeld aan koffie. Dus de temperaturen zijn veel meer in het ochtend gedeelte, maar dat komt omdat er vooral koffie wordt gedronken in de ochtend in dit dataset. Als er meerdere koppen koffie worden gedronken op een dag komen de temperatuur en beurskoersen van die dag dus meermaal terug. 
+
+Laten we daarom eens kijken naar een dataset geaggregeerd per dag.
+
+```{r koffie enz per dag, cache=TRUE}
+#openen van dataset
+library(readr)
+koffie_dag<-read_csv("koffie_dag.csv") 
+kof<-koffie_dag
+kof$aantal<-as.factor(kof$aantal) #koffieaantal als factor gezet.
+library(GGally)
+ggpairs(data = kof,
+        title = "koffie per dag",
+        columns = 2:8,
+        lower = list( combo = "box"),
+        upper = list(combo = "null")
+        )
+```
+
+Hier zien we de relaties tussen koffie beurs en weer per dag. Aantallen koffie lijken niet samen te hangen met andere waarden. Waar zien we grote correlaties: tussen temperatuur en straling .58 , tussen straling en zonne uren .88 , tussen AEX open en zon .77 maar ook tussen AEX sluit en zon .78 en natuurlijk tussen open en sluit koersen van de AEX .99. 
